@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"net/url"
@@ -26,7 +27,7 @@ func worker(id int, jobs <-chan *s3.Object, downloader *s3manager.Downloader, aw
 		os.MkdirAll(path.Dir(path.Join(destDir, *object.Key)), 0777)
 		file, err := os.Create(path.Join(destDir, *object.Key))
 		if err != nil {
-			log.Fatal("Failed to create file", err)
+			log.Fatalln("Failed to create file", err)
 		}
 		defer file.Close()
 
@@ -48,27 +49,30 @@ func worker(id int, jobs <-chan *s3.Object, downloader *s3manager.Downloader, aw
 }
 
 func main() {
+	s3url := flag.String("url", "", "The s3 url to fetch from, e.g s3://foo/bar")
+	destDir := flag.String("output", "", "The directory to output to")
+	flag.Parse()
+
 	jobs := make(chan *s3.Object)
 
-	s3Url := os.Args[1]
-	destDir := os.Args[2]
-
-	u, err := url.Parse(s3Url)
+	u, err := url.Parse(*s3url)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalln(err)
 	}
 
 	s3Bucket := u.Host
 	s3Prefix := u.Path[1:]
 
-	err = os.MkdirAll(destDir, 0700)
+	err = os.MkdirAll(*destDir, 0700)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalln(err)
 	}
 
-	session := session.New(&aws.Config{Region: aws.String(awsRegion)})
-	svc := s3.New(session)
-	downloader := s3manager.NewDownloader(session)
+	awsConfig := &aws.Config{Region: aws.String(awsRegion)}
+	awsSession := session.New(awsConfig)
+
+	svc := s3.New(awsSession)
+	downloader := s3manager.NewDownloader(awsSession)
 
 	params := &s3.ListObjectsInput{
 		Bucket: aws.String(s3Bucket),
@@ -79,7 +83,7 @@ func main() {
 	for w := 1; w <= concurrency; w++ {
 		wg.Add(1)
 		go func(w int) {
-			worker(w, jobs, downloader, s3Bucket, destDir)
+			worker(w, jobs, downloader, s3Bucket, *destDir)
 			defer wg.Done()
 		}(w)
 	}
@@ -98,7 +102,7 @@ func main() {
 	wg.Wait()
 
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalln(err)
 	}
 
 	fmt.Printf("Found %d objects to download.\n", objectsCount)
